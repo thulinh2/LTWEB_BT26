@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Product Management</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    fieldset { margin-bottom: 16px; padding: 10px; }
+    input, select, button, textarea { padding: 6px; margin: 4px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .topbar { display:flex; gap:12px; align-items:center; margin-bottom:10px; }
+    .nav { margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+
+  <div class="nav"><a href="/home.html">← Home</a></div>
+  <h1>Product Management (GraphQL + AJAX)</h1>
+
+  <div class="topbar">
+    <button onclick="getAllProductsSorted()">Tải tất cả product (price tăng dần)</button>
+    <label style="margin-left:12px">Lọc theo Category:
+      <select id="categoryFilterSelect" onchange="filterByCategoryFromSelect()">
+        <option value="">-- Chọn category --</option>
+      </select>
+    </label>
+    <button style="margin-left:auto" onclick="initPage()">Làm mới dữ liệu</button>
+  </div>
+
+  <h2>Danh sách sản phẩm</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>Title</th><th>Price</th><th>Quantity</th><th>Description</th><th>User</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="productTableBody"></tbody>
+  </table>
+
+  <div class="grid">
+    <fieldset>
+      <legend>Thêm sản phẩm</legend>
+      <label>Title<br><input id="create_title"></label><br>
+      <label>Price<br><input id="create_price" type="number" step="0.01"></label><br>
+      <label>Quantity<br><input id="create_quantity" type="number"></label><br>
+      <label>Description<br><textarea id="create_description"></textarea></label><br>
+      <label>User (owner)<br>
+        <select id="create_user_select"></select>
+      </label><br>
+      <button onclick="handleCreateProduct()">Create product</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cập nhật sản phẩm</legend>
+      <input id="update_id" type="hidden">
+      <label>ID<br><input id="update_id_text" readonly></label><br>
+      <label>Title<br><input id="update_title"></label><br>
+      <label>Price<br><input id="update_price" type="number" step="0.01"></label><br>
+      <label>Quantity<br><input id="update_quantity" type="number"></label><br>
+      <label>Description<br><textarea id="update_description"></textarea></label><br>
+      <button onclick="handleUpdateProduct()">Update product</button>
+      <button onclick="clearUpdateForm()">Clear</button>
+    </fieldset>
+  </div>
+
+  <script>
+    // Nếu bạn đổi path GraphQL thì sửa phía dưới
+    const API_URL = "/graphql";
+
+    async function graphqlFetch(query, variables = {}) {
+      try {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, variables })
+        });
+        const json = await res.json();
+        if (json.errors) {
+          console.error("GraphQL errors:", json.errors);
+          alert("GraphQL lỗi: " + (json.errors[0] && json.errors[0].message));
+        }
+        return json.data || null;
+      } catch (e) {
+        console.error(e);
+        alert("Network lỗi khi gọi GraphQL. Kiểm tra server và console.");
+        return null;
+      }
+    }
+
+    // --- PRODUCTS ---
+    async function getAllProductsSorted() {
+      const query = `
+        query {
+          getAllProductsSorted {
+            id title price quantity description user { id fullname email }
+          }
+        }
+      `;
+      const data = await graphqlFetch(query);
+      renderProducts(data ? data.getAllProductsSorted : []);
+    }
+
+    function renderProducts(products) {
+      const tbody = document.getElementById("productTableBody");
+      tbody.innerHTML = "";
+      products.forEach(p => {
+        const tr = document.createElement("tr");
+        const userInfo = p.user ? `${escapeHtml(p.user.fullname)} (id:${p.user.id})` : "";
+        tr.innerHTML = `
+          <td>${p.id}</td>
+          <td>${escapeHtml(p.title)}</td>
+          <td>${p.price}</td>
+          <td>${p.quantity}</td>
+          <td>${escapeHtml(p.description || "")}</td>
+          <td>${userInfo}</td>
+          <td>
+            <button onclick='populateUpdateForm(${p.id}, ${toJsString(p.title)}, ${p.price}, ${p.quantity}, ${toJsString(p.description)})'>Edit</button>
+            <button onclick="handleDeleteProduct(${p.id})">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function getProductsByCategory(categoryId) {
+      const query = `
+        query($categoryId: Int!) {
+          getProductsByCategory(categoryId: $categoryId) {
+            id title price quantity description user { id fullname }
+          }
+        }
+      `;
+      const data = await graphqlFetch(query, { categoryId });
+      renderProducts(data ? data.getProductsByCategory : []);
+    }
+
+    function filterByCategoryFromSelect() {
+      const v = document.getElementById("categoryFilterSelect").value;
+      if (!v) return getAllProductsSorted();
+      getProductsByCategory(parseInt(v));
+    }
+
+    function toJsString(s) { return JSON.stringify(s || ""); }
+    function escapeHtml(s) { if (!s) return ""; return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    async function handleCreateProduct() {
+      const title = document.getElementById("create_title").value.trim();
+      const price = parseFloat(document.getElementById("create_price").value);
+      const quantity = parseInt(document.getElementById("create_quantity").value);
+      const description = document.getElementById("create_description").value;
+      const userId = parseInt(document.getElementById("create_user_select").value);
+
+      if (!title || Number.isNaN(price) || Number.isNaN(quantity) || Number.isNaN(userId)) {
+        alert("Vui lòng nhập đầy đủ: title, price, quantity và chọn user.");
+        return;
+      }
+
+      const mutation = `
+        mutation($title:String!, $quantity:Int!, $description:String, $price:Float!, $userId:Int!) {
+          createProduct(title:$title, quantity:$quantity, description:$description, price:$price, userId:$userId) {
+            id title price
+          }
+        }
+      `;
+      await graphqlFetch(mutation, { title, quantity, description: description || null, price, userId });
+      clearCreateProductForm();
+      await initPage();
+    }
+
+    async function handleDeleteProduct(id) {
+      if (!confirm("Bạn chắc muốn xóa product id=" + id + " ?")) return;
+      const mutation = `mutation($id:Int!){ deleteProduct(id:$id) }`;
+      await graphqlFetch(mutation, { id });
+      await initPage();
+    }
+
+    function populateUpdateForm(id, title, price, quantity, description) {
+      document.getElementById("update_id").value = id;
+      document.getElementById("update_id_text").value = id;
+      document.getElementById("update_title").value = JSON.parse(title);
+      document.getElementById("update_price").value = price;
+      document.getElementById("update_quantity").value = quantity;
+      document.getElementById("update_description").value = JSON.parse(description);
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    async function handleUpdateProduct() {
+      const id = parseInt(document.getElementById("update_id").value);
+      if (Number.isNaN(id)) { alert("ID không hợp lệ"); return; }
+      const title = document.getElementById("update_title").value.trim();
+      const price = parseFloat(document.getElementById("update_price").value);
+      const quantity = parseInt(document.getElementById("update_quantity").value);
+      const description = document.getElementById("update_description").value;
+
+      const mutation = `
+        mutation($id:Int!, $title:String, $quantity:Int, $description:String, $price:Float) {
+          updateProduct(id:$id, title:$title, quantity:$quantity, description:$description, price:$price) {
+            id title
+          }
+        }
+      `;
+      await graphqlFetch(mutation, {
+        id,
+        title: title || null,
+        quantity: Number.isNaN(quantity) ? null : quantity,
+        description: description || null,
+        price: Number.isNaN(price) ? null : price
+      });
+      clearUpdateForm();
+      await initPage();
+    }
+
+    function clearCreateProductForm() {
+      document.getElementById("create_title").value = "";
+      document.getElementById("create_price").value = "";
+      document.getElementById("create_quantity").value = "";
+      document.getElementById("create_description").value = "";
+      document.getElementById("create_user_select").selectedIndex = 0;
+    }
+    function clearUpdateForm() {
+      document.getElementById("update_id").value = "";
+      document.getElementById("update_id_text").value = "";
+      document.getElementById("update_title").value = "";
+      document.getElementById("update_price").value = "";
+      document.getElementById("update_quantity").value = "";
+      document.getElementById("update_description").value = "";
+    }
+
+    // --- Users & Categories helpers (để điền select, load data) ---
+    async function loadUsersForSelect() {
+      const q = `query { getAllUsers { id fullname } }`;
+      const data = await graphqlFetch(q);
+      const users = data ? data.getAllUsers : [];
+      const sel = document.getElementById("create_user_select");
+      sel.innerHTML = "<option value=''>-- Chọn user --</option>";
+      users.forEach(u => {
+        const opt = document.createElement("option");
+        opt.value = u.id;
+        opt.text = `${u.fullname} (id:${u.id})`;
+        sel.appendChild(opt);
+      });
+    }
+
+    async function loadCategoriesForFilter() {
+      const q = `query { getAllCategories { id name } }`;
+      const data = await graphqlFetch(q);
+      const cats = data ? data.getAllCategories : [];
+      const sel = document.getElementById("categoryFilterSelect");
+      sel.innerHTML = "<option value=''>-- Chọn category --</option>";
+      cats.forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        opt.text = `${c.name} (id:${c.id})`;
+        sel.appendChild(opt);
+      });
+    }
+
+    // Init:
+    async function initPage() {
+      await loadUsersForSelect();
+      await loadCategoriesForFilter();
+      await getAllProductsSorted();
+    }
+    window.addEventListener("load", initPage);
+  </script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>User Management</title>
+  <style>
+    body{font-family:Arial;margin:20px;}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #ddd;padding:8px}
+    th{background:#f4f4f4}
+    input,button{padding:6px;margin:4px 0}
+    .nav{margin-bottom:12px}
+  </style>
+</head>
+<body>
+  <div class="nav"><a href="/home.html">← Home</a></div>
+  <h1>Users</h1>
+
+  <button onclick="loadUsers()">Tải users</button>
+  <table>
+    <thead><tr><th>ID</th><th>Fullname</th><th>Email</th><th>Phone</th><th>Actions</th></tr></thead>
+    <tbody id="userTableBody"></tbody>
+  </table>
+
+  <h3>Thêm User</h3>
+  <input id="u_fullname" placeholder="Fullname"><br>
+  <input id="u_email" placeholder="Email"><br>
+  <input id="u_password" placeholder="Password"><br>
+  <input id="u_phone" placeholder="Phone"><br>
+  <button onclick="handleCreateUser()">Create User</button>
+
+  <script>
+    const API_URL = "/graphql";
+    async function graphqlFetch(q,v={}){ try{
+      const res = await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,variables:v})});
+      const json = await res.json();
+      if(json.errors){console.error(json.errors); alert(json.errors[0].message || 'GraphQL error');}
+      return json.data||null;
+    }catch(e){console.error(e);alert('Network lỗi');return null;}}
+
+    async function loadUsers(){
+      const q = `query { getAllUsers { id fullname email phone } }`;
+      const d = await graphqlFetch(q);
+      const users = d ? d.getAllUsers : [];
+      const tbody = document.getElementById("userTableBody"); tbody.innerHTML = "";
+      users.forEach(u=>{
+        const tr=document.createElement("tr");
+        tr.innerHTML = `
+          <td>${u.id}</td>
+          <td>${escapeHtml(u.fullname)}</td>
+          <td>${escapeHtml(u.email)}</td>
+          <td>${escapeHtml(u.phone || '')}</td>
+          <td>
+            <button onclick='promptEditUser(${u.id},${JSON.stringify(u.fullname)},${JSON.stringify(u.email)},${JSON.stringify(u.phone)})'>Edit</button>
+            <button onclick='deleteUser(${u.id})'>Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function escapeHtml(s){ if(!s) return ''; return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');}
+
+    async function handleCreateUser(){
+      const fullname = document.getElementById("u_fullname").value.trim();
+      const email = document.getElementById("u_email").value.trim();
+      const password = document.getElementById("u_password").value;
+      const phone = document.getElementById("u_phone").value;
+      if(!fullname||!email||!password){ alert('fullname,email,password bắt buộc'); return; }
+      const m = `mutation($fullname:String!,$email:String!,$password:String!,$phone:String){ createUser(fullname:$fullname,email:$email,password:$password,phone:$phone){ id fullname email } }`;
+      await graphqlFetch(m,{fullname,email,password,phone: phone || null});
+      document.getElementById("u_fullname").value=''; document.getElementById("u_email").value=''; document.getElementById("u_password").value=''; document.getElementById("u_phone").value='';
+      await loadUsers();
+    }
+
+    async function deleteUser(id){
+      if(!confirm('Xóa user id='+id+'?')) return;
+      const m = `mutation($id:Int!){ deleteUser(id:$id) }`;
+      await graphqlFetch(m,{id});
+      await loadUsers();
+    }
+
+    function promptEditUser(id,fullname,email,phone){
+      const newFull = prompt('Fullname:', JSON.parse(fullname));
+      if(newFull===null) return;
+      const newEmail = prompt('Email:', JSON.parse(email));
+      const newPhone = prompt('Phone:', JSON.parse(phone));
+      updateUser(id,newFull,newEmail,null,newPhone);
+    }
+    async function updateUser(id,fullname,email,password,phone){
+      const m = `mutation($id:Int!,$fullname:String,$email:String,$password:String,$phone:String){ updateUser(id:$id,fullname:$fullname,email:$email,password:$password,phone:$phone){ id fullname } }`;
+      await graphqlFetch(m,{id,fullname,email,password,phone});
+      await loadUsers();
+    }
+
+    // init
+    window.addEventListener('load', loadUsers);
+  </script>
+</body>
+</html>

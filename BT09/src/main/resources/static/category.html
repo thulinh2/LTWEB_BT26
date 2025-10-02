@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Category Management</title>
+  <style>
+    body{font-family:Arial;margin:20px}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #ddd;padding:8px}
+    th{background:#f4f4f4}
+    input,button{padding:6px;margin:4px 0}
+    .nav{margin-bottom:12px}
+  </style>
+</head>
+<body>
+  <div class="nav"><a href="/home.html">← Home</a></div>
+  <h1>Categories</h1>
+
+  <button onclick="loadCategories()">Tải categories</button>
+  <table>
+    <thead><tr><th>ID</th><th>Name</th><th>Images</th><th>Actions</th></tr></thead>
+    <tbody id="categoryTableBody"></tbody>
+  </table>
+
+  <h3>Thêm Category</h3>
+  <input id="c_name" placeholder="Name"><br>
+  <input id="c_images" placeholder="Images (url)"><br>
+  <button onclick="handleCreateCategory()">Create Category</button>
+
+  <script>
+    const API_URL = "/graphql";
+    async function graphqlFetch(q,v={}){ try{
+      const res = await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,variables:v})});
+      const json = await res.json();
+      if(json.errors){console.error(json.errors); alert(json.errors[0].message || 'GraphQL lỗi');}
+      return json.data||null;
+    }catch(e){console.error(e);alert('Network lỗi');return null;}}
+
+    async function loadCategories(){
+      const q = `query { getAllCategories { id name images } }`;
+      const d = await graphqlFetch(q);
+      const cats = d ? d.getAllCategories : [];
+      const tbody = document.getElementById("categoryTableBody"); tbody.innerHTML = "";
+      cats.forEach(c=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${c.id}</td>
+          <td>${escapeHtml(c.name)}</td>
+          <td>${escapeHtml(c.images||'')}</td>
+          <td>
+            <button onclick='promptEditCategory(${c.id},${JSON.stringify(c.name)},${JSON.stringify(c.images)})'>Edit</button>
+            <button onclick='deleteCategory(${c.id})'>Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function escapeHtml(s){ if(!s) return ''; return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');}
+
+    async function handleCreateCategory(){
+      const name = document.getElementById("c_name").value.trim();
+      const images = document.getElementById("c_images").value.trim();
+      if(!name){ alert('Name bắt buộc'); return; }
+      const m = `mutation($name:String!,$images:String){ createCategory(name:$name,images:$images){ id name } }`;
+      await graphqlFetch(m,{name, images: images || null});
+      document.getElementById("c_name").value=''; document.getElementById("c_images").value='';
+      await loadCategories();
+    }
+
+    async function deleteCategory(id){
+      if(!confirm('Xóa category id='+id+'?')) return;
+      const m = `mutation($id:Int!){ deleteCategory(id:$id) }`;
+      await graphqlFetch(m,{id});
+      await loadCategories();
+    }
+
+    function promptEditCategory(id,name,images){
+      const newName = prompt('Name:', JSON.parse(name));
+      if(newName===null) return;
+      const newImages = prompt('Images:', JSON.parse(images));
+      updateCategory(id,newName,newImages);
+    }
+
+    async function updateCategory(id,name,images){
+      const m = `mutation($id:Int!,$name:String,$images:String){ updateCategory(id:$id,name:$name,images:$images){ id name } }`;
+      await graphqlFetch(m,{id,name,images: images || null});
+      await loadCategories();
+    }
+
+    window.addEventListener('load', loadCategories);
+  </script>
+</body>
+</html>
